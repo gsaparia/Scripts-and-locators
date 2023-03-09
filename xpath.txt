@@ -1,3 +1,7 @@
 https://devhints.io/xpath
 
+//parent//child[attributes]/ancestor::ansestorselector
 (//div[@id='frm_bodyArea']//h1[contains(text(),'Traffic')]/ancestor::div/children)[1]
+
+//tag[@attribute and @attribute]
+//a[contains(@class,'button-raised') and contains(text(),'View traff')]
