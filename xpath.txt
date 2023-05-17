@@ -1,4 +1,5 @@
 https://devhints.io/xpath
+https://www.lambdatest.com/blog/most-exhaustive-xpath-locators-cheat-sheet/
 
 //parent//child[attributes]/ancestor::ansestorselector
 (//div[@id='frm_bodyArea']//h1[contains(text(),'Traffic')]/ancestor::div/children)[1]
