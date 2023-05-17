@@ -5,3 +5,6 @@ https://devhints.io/xpath
 
 //tag[@attribute and @attribute]
 //a[contains(@class,'button-raised') and contains(text(),'View traff')]
+
+//Parent[@ParentAttribute and .//child property]      selects parent based on child propery
+//a[@role="option" and .//*[.='My Contacts']]
