@@ -9,3 +9,12 @@ https://www.lambdatest.com/blog/most-exhaustive-xpath-locators-cheat-sheet/
 
 //Parent[@ParentAttribute and .//child property]      selects parent based on child propery
 //a[@role="option" and .//*[.='My Contacts']]
+
+
+//Radio
+container[containerproperty like .="xyz"][.//child[child's child]]
+
+//fieldset[.//.="Select a record type"][.//Label[.//.="Public"]]
+
+//Label
+//fieldset[.//.="Select a record type"][.//Label[.//.="Public"]]//Label[.//.="Public"]
