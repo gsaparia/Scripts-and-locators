@@ -18,3 +18,80 @@ container[containerproperty like .="xyz"][.//child[child's child]]
 
 //Label
 //fieldset[.//.="Select a record type"][.//Label[.//.="Public"]]//Label[.//.="Public"]
+
+
+
+
+CRM
+field container with crmid
+(.//div[@data-control-name][@data-id])
+
+field container
+(.//div[contains(@id,"Container")][@data-id][.//label[.="Brand name"]])
+
+//all fields labels
+(.//div[contains(@id,"Container")][@data-id][.//label])//label[@id]
+
+//locked field
+(.//div[contains(@id,"Container")][@data-id][.//label[.="Organisation"]])//*[contains(@id,"-locked-iconWrapp")]
+
+
+//field control.
+(.//div[@data-control-name][@data-id])[.//label[.="Brand name"]]//div[contains(@data-lp-id,".fieldControl|")]
+
+//field type
+(.//div[@data-control-name][@data-id])[.//label[.="Brand name"]]//div[contains(@data-lp-id,".fieldControl|")] 
+	Textbox:  			@data-lp-id contains "TextInput"
+	simple lookup: 		@data-lp-id contains "SimpleLookupControl"
+	datetimec ontrol    					"DateTimeControl"
+	OptionSet								".OptionSet|"
+
+///field value
+//textbox : get text from
+(.//div[@data-control-name][@data-id])[.//label[.="Brand name"]]//input
+
+//SimpleLookupControl
+	(.//div[@data-control-name][@data-id])[.//label[.="Organisation"]]//div[contains(@data-id,"_text")]
+	
+//DateTimeControl
+	
+	(.//div[contains(@id,"Container")][@data-id][.//label[.="Effective date"]])//input
+	
+//  optionset
+	(.//div[contains(@id,"Container")][@data-id][.//label[.="Status"]])//button		
+	
+	
+//
+dialog
+.//div[@role="dialog"][@aria-modal="true"]//button[.//text()="Deactivate"]
+
+
+(.//div[contains(@id,"Container")][@data-id][.//label[.="Forecast effective date"]])//input
+//*[@role="treeitem"][.//text()="15/11/2023"][1]
+
+
+
+
+////Grid cell text
+
+//Column header
+.//*[@role="columnheader"][.//*[text()!=""]]//*[text()!=""][@role="none"]
+//cell
+.//*[@role="gridcell"][.//*[text()!=""]]//*[text()!=""][@role]
+
+//subarea
+.//div[@title][.//*[text()="Schedule management cases"]]
+
+
+//model dialog
+container:
+.//div[contains(@id,"modalDialogContentContainer")]
+
+title:
+.//div[contains(@id,"modalDialogContentContainer")]//h1
+
+Message
+.//div[contains(@id,"modalDialogContentContainer")]//*[@data-id="dialogMessageText"]
+
+button
+.//div[contains(@id,"modalDialogContentContainer")]//button[@aria-label="Save and continue"]
