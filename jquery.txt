@@ -79,3 +79,20 @@ console.log(s);
 
 //startup
 shell:startup
+
+Bookmarklet: Image Click1
+javascript: (() => {  $( "img" ).click(function() { var wi = window.open(); wi.document.write("<img src='"+$(this).attr('src')+"'width=1500px>"); }); })();
+
+
+bookmarklet: image click 2
+javascript: (() => {  const script = document.createElement("script");script.src = 'https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js';script.type = 'text/javascript';script.addEventListener('load', () => {console.log(`jQuery ${$.fn.jquery} has been loaded successfully!`);  }); document.head.appendChild(script);$( "img" ).click(function() { var wi = window.open(); wi.document.write("<img src='"+$(this).attr('src')+"'width=1500px>"); }); $("div,span,button").click(function() {var bg = $(this).css('background-image');bg = bg.replace('url(','').replace(')','').replace(/\"/gi, "");if(bg != "none"){ var wi = window.open(); wi.document.write("<img src='"+bg+" 'width=1500px>");};});})();
+
+bookmarklet: list ids
+javascript:(()=>{var s="";$( "td[data-column-index='5']" ).each(function( index ) { s+= $( this ).text()+", ";});console.log( s );})();
+
+bookmarklet: Get html
+
+javascript:console.log(document.documentElement.outerHTML);
+
+
+
