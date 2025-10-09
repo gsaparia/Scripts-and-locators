@@ -1,0 +1,63 @@
+# ==========================
+# Configurable target folder
+# ==========================
+$targetFolder = "C:\WebDrivers\EdgeDriver"
+$edgeDriverPath = Join-Path $targetFolder "msedgedriver.exe"
+$tempZip = "$env:TEMP\edgedriver.zip"
+
+# ==========================
+# 1) Get installed Edge version
+# ==========================
+$edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+
+if (-not (Test-Path $edgePath)) {
+    Write-Host "❌ Microsoft Edge not found at default path."
+    exit
+}
+
+$edgeVersion = (Get-Item $edgePath).VersionInfo.ProductVersion
+Write-Host "Microsoft Edge version detected: $edgeVersion"
+
+# ==========================
+# 2) Check if EdgeDriver already exists and matches version
+# ==========================
+$needsDownload = $true
+
+if (Test-Path $edgeDriverPath) {
+    $driverVersion = (Get-Item $edgeDriverPath).VersionInfo.ProductVersion
+    Write-Host "Existing EdgeDriver version detected: $driverVersion"
+
+    if ($driverVersion -eq $edgeVersion) {
+        Write-Host "✅ EdgeDriver version matches Edge. No download needed."
+        $needsDownload = $false
+    } else {
+        Write-Host "⚠️ Version mismatch. Will download correct EdgeDriver."
+    }
+} else {
+    Write-Host "ℹ️ EdgeDriver not found. Will download."
+}
+
+# ==========================
+# 3) Download & extract only if needed
+# ==========================
+if ($needsDownload) {
+
+    if (-not (Test-Path $targetFolder)) {
+        New-Item -ItemType Directory -Path $targetFolder | Out-Null
+    }
+
+    $zipUrl = "https://msedgedriver.microsoft.com/$edgeVersion/edgedriver_win64.zip"
+    Write-Host "Downloading EdgeDriver from: $zipUrl"
+
+    try {
+        Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing -ErrorAction Stop
+        Write-Host "Download complete. Extracting..."
+        Expand-Archive -Path $tempZip -DestinationPath $targetFolder -Force
+        Remove-Item $tempZip -Force
+        Write-Host "✅ EdgeDriver updated successfully to version $edgeVersion"
+    }
+    catch {
+        Write-Host "❌ Failed to download EdgeDriver from: $zipUrl"
+        Write-Host "Visit https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/ to download manually."
+    }
+}
