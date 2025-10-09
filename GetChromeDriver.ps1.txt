@@ -27,6 +27,7 @@ Write-Host "Google Chrome version detected: $chromeVersion"
 $needsDownload = $true
 $chromeMajor = $chromeVersion.Split('.')[0]
 
+$existingDriverVersion = "0"
 if (Test-Path $chromeDriverPath) {
     try {
         $existingDriverVersion = (Get-Item $chromeDriverPath).VersionInfo.ProductVersion
@@ -71,12 +72,19 @@ if ($needsDownload) {
         Write-Host "❌ Could not find compatible ChromeDriver for version $chromeVersion"
         exit 1
     }
+	
+	
 
     # Get the highest available patch for that major
     $latestMatch = $versions[-1]  # last item is the newest
     $driverVersion = $latestMatch.version
     $zipUrl = $latestMatch.downloads.chromedriver | Where-Object { $_.platform -eq "win64" } | Select-Object -ExpandProperty url
 
+	if ($existingDriverVersion -eq $driverVersion) {
+		Write-Host "✅ ChromeDriver version matches latest chrome driver. No download needed."
+		exit 0
+	}
+	
     Write-Host "Latest compatible ChromeDriver: $driverVersion"
     Write-Host "Downloading from: $zipUrl"
 
