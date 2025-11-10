@@ -1,0 +1,59 @@
+function findAllElementsDeep(selector) {
+    const isXPath = selector.trim().startsWith('/') || selector.trim().startsWith('(');
+
+    // 🔁 Recursively collect all elements from every nested shadow root
+    function collectAll(root) {
+        const all = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
+        let node = walker.currentNode;
+        while (node) {
+            all.push(node);
+            if (node.shadowRoot) {
+                all.push(...collectAll(node.shadowRoot));
+            }
+            node = walker.nextNode();
+        }
+        return all;
+    }
+
+    const allNodes = collectAll(document);
+    const results = new Set(); // avoid duplicates
+
+    if (!isXPath) {
+        // ✅ Normal CSS selector search
+        for (const node of allNodes) {
+            try {
+                const foundList = node.querySelectorAll(selector);
+                for (const f of foundList) results.add(f);
+            } catch { /* ignore malformed selectors */ }
+        }
+        return [...results];
+    }
+
+    // ✅ Limited XPath-like emulation (text search only)
+    // Supports:
+    //   //*[text()='Some text']
+    //   //*[contains(text(),'Some text')]
+    const exactMatch = selector.match(/text\(\)\s*=\s*['"](.+?)['"]/);
+    const containsMatch = selector.match(/contains\s*\(\s*text\(\)\s*,\s*['"](.+?)['"]\s*\)/);
+    const targetText = exactMatch ? exactMatch[1] : containsMatch ? containsMatch[1] : null;
+
+    if (!targetText) {
+        console.warn('Complex XPath not supported inside shadow roots. Use CSS or simple text match.');
+        return [];
+    }
+
+    for (const el of allNodes) {
+        if (el.textContent) {
+            const text = el.textContent.trim();
+            if (
+                (exactMatch && text === targetText) ||
+                (containsMatch && text.includes(targetText))
+            ) {
+                results.add(el);
+            }
+        }
+    }
+
+    return [...results];
+}
