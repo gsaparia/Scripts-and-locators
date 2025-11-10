@@ -1,0 +1,72 @@
+function findAllElementsDeep(selector, textToMatch = null, caseInsensitive = true) {
+    const isXPath = selector && (selector.trim().startsWith('/') || selector.trim().startsWith('('));
+
+    // 🔁 Recursively collect all elements from document + nested shadow roots
+    function collectAll(root) {
+        const all = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
+        let node = walker.currentNode;
+        while (node) {
+            all.push(node);
+            if (node.shadowRoot) {
+                all.push(...collectAll(node.shadowRoot));
+            }
+            node = walker.nextNode();
+        }
+        return all;
+    }
+
+    const allNodes = collectAll(document);
+    const results = new Set();
+
+    // Helper for case-insensitive comparison
+    function textMatches(elText, target) {
+        if (!target) return true;
+        if (caseInsensitive) {
+            return elText.toLowerCase().includes(target.toLowerCase());
+        } else {
+            return elText.includes(target);
+        }
+    }
+
+    // 🧩 1️⃣ Handle CSS selectors
+    if (!isXPath) {
+        for (const node of allNodes) {
+            try {
+                const foundList = node.querySelectorAll(selector);
+                for (const el of foundList) {
+                    const text = el.textContent?.trim() || '';
+                    if (!textToMatch || textMatches(text, textToMatch)) {
+                        results.add(el);
+                    }
+                }
+            } catch {
+                /* ignore invalid selectors */
+            }
+        }
+        return [...results];
+    }
+
+    // 🧩 2️⃣ Handle simple XPath-like text-based cases or fallback
+    const exactMatch = selector.match(/text\(\)\s*=\s*['"](.+?)['"]/);
+    const containsMatch = selector.match(/contains\s*\(\s*text\(\)\s*,\s*['"](.+?)['"]\s*\)/);
+    const targetText = textToMatch || (exactMatch ? exactMatch[1] : containsMatch ? containsMatch[1] : null);
+
+    if (!targetText) {
+        console.warn('Complex XPath not supported inside shadow roots. Provide textToMatch instead.');
+        return [];
+    }
+
+    for (const el of allNodes) {
+        const text = el.textContent?.trim() || '';
+        if (
+            (exactMatch && (caseInsensitive ? text.toLowerCase() === targetText.toLowerCase() : text === targetText)) ||
+            (containsMatch && textMatches(text, targetText)) ||
+            (!exactMatch && !containsMatch && textMatches(text, targetText))
+        ) {
+            results.add(el);
+        }
+    }
+
+    return [...results];
+}
