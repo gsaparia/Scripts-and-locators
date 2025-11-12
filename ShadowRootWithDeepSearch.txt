@@ -1,59 +1,207 @@
-function findAllElementsDeep(selector) {
-    const isXPath = selector.trim().startsWith('/') || selector.trim().startsWith('(');
+#region NG Functions
 
-    // 🔁 Recursively collect all elements from every nested shadow root
-    function collectAll(root) {
-        const all = [];
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
-        let node = walker.currentNode;
-        while (node) {
-            all.push(node);
-            if (node.shadowRoot) {
-                all.push(...collectAll(node.shadowRoot));
+public const string jsNGHelper = @"
+    if(typeof flattenDOMWithMapping != ""function"")
+    {
+        window.flattenDOMWithMapping = function flattenDOMWithMapping(root = document) {
+            const cloneRoot = document.implementation.createHTMLDocument('Flattened Copy');
+            const bodyClone = cloneRoot.body;
+
+            // Map cloned element → original element
+            const elementMap = new Map();
+
+        window.traverse = function traverse(node, parentClone) {
+	            let clone;
+	            if (node.nodeType === Node.ELEMENT_NODE) {
+		            clone = cloneRoot.createElement(node.tagName.toLowerCase());
+		            for (let attr of node.attributes) {
+			            clone.setAttribute(attr.name, attr.value);
+		            }
+	            } else if (node.nodeType === Node.TEXT_NODE) {
+		            clone = cloneRoot.createTextNode(node.nodeValue);
+	            } else {
+		            return;
+	            }
+
+	            parentClone.appendChild(clone);
+	            elementMap.set(clone, node);
+
+	            if (node.shadowRoot) {
+		            node.shadowRoot.childNodes.forEach(child => traverse(child, clone));
+	            }
+	            node.childNodes.forEach(child => traverse(child, clone));
             }
-            node = walker.nextNode();
-        }
-        return all;
-    }
 
-    const allNodes = collectAll(document);
-    const results = new Set(); // avoid duplicates
+            traverse(root.documentElement, bodyClone);
 
-    if (!isXPath) {
-        // ✅ Normal CSS selector search
-        for (const node of allNodes) {
-            try {
-                const foundList = node.querySelectorAll(selector);
-                for (const f of foundList) results.add(f);
-            } catch { /* ignore malformed selectors */ }
-        }
-        return [...results];
-    }
-
-    // ✅ Limited XPath-like emulation (text search only)
-    // Supports:
-    //   //*[text()='Some text']
-    //   //*[contains(text(),'Some text')]
-    const exactMatch = selector.match(/text\(\)\s*=\s*['"](.+?)['"]/);
-    const containsMatch = selector.match(/contains\s*\(\s*text\(\)\s*,\s*['"](.+?)['"]\s*\)/);
-    const targetText = exactMatch ? exactMatch[1] : containsMatch ? containsMatch[1] : null;
-
-    if (!targetText) {
-        console.warn('Complex XPath not supported inside shadow roots. Use CSS or simple text match.');
-        return [];
-    }
-
-    for (const el of allNodes) {
-        if (el.textContent) {
-            const text = el.textContent.trim();
-            if (
-                (exactMatch && text === targetText) ||
-                (containsMatch && text.includes(targetText))
-            ) {
-                results.add(el);
+            //Single-element helpers
+            window.findOriginalBySelector = function findOriginalBySelector(selector) {
+	            const clonedElement = cloneRoot.querySelector(selector);
+	            return clonedElement ? elementMap.get(clonedElement) : null;
             }
-        }
-    }
 
-    return [...results];
+            window.findOriginalByXPath = function findOriginalByXPath(xpath) {
+	            const result = cloneRoot.evaluate(xpath, cloneRoot, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+	            return result.singleNodeValue ? elementMap.get(result.singleNodeValue) : null;
+            }
+
+            //Multi-element helpers
+            window.findAllOriginalBySelector = function findAllOriginalBySelector(selector) {
+	            const clonedElements = cloneRoot.querySelectorAll(selector);
+	            return Array.from(clonedElements).map(el => elementMap.get(el)).filter(obj => {  return obj.offsetWidth>2 && obj.offsetHeight>2 && !obj.hidden});
+            }
+
+            window.findAllOriginalByXPath = function findAllOriginalByXPath(xpath) {
+	            const results = [];
+	            const iterator = cloneRoot.evaluate(xpath, cloneRoot, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+	            let node;
+	            while ((node = iterator.iterateNext())) {
+		            results.push(elementMap.get(node));
+	            }
+	            return results.filter(obj => {  return obj.offsetWidth>2 && obj.offsetHeight>2 && !obj.hidden});
+            }
+
+            //Auto-detect helper
+            window.findAllOriginal = function findAllOriginal(selector) {
+	            // Simple heuristic: XPath usually starts with '/' or '.'
+	            const isXPath = selector.startsWith(""*//"") || selector.startsWith(""//"") || selector.startsWith("".//"")|| selector.trim().startsWith('(');
+	            return isXPath ? findAllOriginalByXPath(selector) : findAllOriginalBySelector(selector);
+            }
+
+            return {
+	            flattenedDoc: cloneRoot,
+	            map: elementMap,
+	            findOriginalBySelector,
+	            findOriginalByXPath,
+	            findAllOriginalBySelector,
+	            findAllOriginalByXPath,
+	            findAllOriginal
+            };
+        }
+    }           
+";
+
+public const string jsNGInit = "var { flattenedDoc, findOriginalBySelector, findOriginalByXPath,   findAllOriginalBySelector, findAllOriginalByXPath, findAllOriginal } = flattenDOMWithMapping();";
+public static IWebElement NgGetElementOrNull(this IWebDriver driver, string selector, int maxWaitTimeInSeconds = -1)
+{
+    IWebElement el = null;
+    IJavaScriptExecutor js = (IJavaScriptExecutor)driver;                       
+    selector = selector.Contains("'") ? selector.Replace("'", "\"") : selector;
+    var script = $"return findAllOriginal('{selector}')[0];";
+
+    Retry.Until
+        (
+            () => { js.ExecuteScript(jsNGHelper); js.ExecuteScript(jsNGInit); el = js.ExecuteScript(script) as IWebElement;  },
+            () => el != null,
+            maxWaitTimeInSeconds
+        );
+    return el;
+}
+
+public static IWebElement NgGetElement(this IWebDriver driver, string selector, int maxWaitTimeInSeconds = -1)
+{
+    var el = driver.NgGetElementOrNull(selector, maxWaitTimeInSeconds);
+    if (el == null)
+        throw new Exception(($"element not found with selector '{selector}'"));
+    return el;
+}
+public static IWebElement NgGetLastElement(this IWebDriver driver, string selector, int maxWaitTimeInSeconds = -1)
+{
+    IWebElement el = null;
+    IJavaScriptExecutor js = (IJavaScriptExecutor)driver;                        
+    selector = selector.Contains("'") ? selector.Replace("'", "\"") : selector;
+    var script = $"return findAllOriginal(\"{selector}\")[findAllOriginal(\"{selector}\").length-1];";
+
+    Retry.Until
+        (
+            () => { js.ExecuteScript(jsNGHelper); js.ExecuteScript(jsNGInit); el = js.ExecuteScript(script) as IWebElement; },
+            () => el != null,
+            maxWaitTimeInSeconds
+        );
+    if (el == null)
+        throw new Exception(($"element not found with selector '{selector}'"));
+    return el;
+}
+
+public static IWebElement NgGetNthElement(this IWebDriver driver, string selector, int nthLocation, int maxWaitTimeInSeconds = -1)
+{
+    IWebElement el = null;
+    IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+                
+    selector = selector.Contains("'") ? selector.Replace("'", "\"") : selector;
+    var script = $"return findAllOriginal(\"{selector}\")[{nthLocation}];";
+
+    Retry.Until
+        (
+            () => { js.ExecuteScript(jsNGHelper); js.ExecuteScript(jsNGInit); el = js.ExecuteScript(script) as IWebElement; },
+            () => el != null,
+            maxWaitTimeInSeconds
+        );
+    if (el == null)
+        throw new Exception(($"element not found elemation at location {nthLocation} with selector '{selector}'"));
+    return el;
+}
+public static void NgClickIt(this IWebDriver driver, string selector, int maxWaitTimeInSeconds = -1)
+{
+    var el = driver.NgGetElementOrNull(selector, maxWaitTimeInSeconds);
+    if (el == null)
+        throw new Exception(($"element not found with selector '{selector}'"));
+    el.ScrollTo();
+    driver.JsClick(el);
+}
+
+public static void NgClickItIfVisible(this IWebDriver driver, string selector, int maxWaitTimeInSeconds = -1)
+{
+    var el = driver.NgGetElementOrNull(selector, maxWaitTimeInSeconds);
+    if (el == null)
+        return;
+    el.ScrollTo();
+    driver.JsClick(el);
+}
+
+public static bool NgIsElementVisible(this IWebDriver driver, string selector, int maxWaitTimeInSeconds = -1)
+{
+    var el = driver.NgGetElementOrNull(selector, maxWaitTimeInSeconds);
+    if (el == null) return false;
+    el.ScrollTo();
+    return true;
+}
+
+#endregion
+
+public static bool IsElementInViewport(this IWebElement element)
+{
+    // First, check if the element is displayed at all
+    if (!element.Displayed)
+    {
+        return false;
+    }
+    var driver = element.GetWebDriver();
+    // Execute JavaScript to get element's bounding rectangle and viewport dimensions
+    IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+    var script = @"
+    var rect = arguments[0].getBoundingClientRect();
+    var viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    var viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    return {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        viewportHeight: viewportHeight,
+        viewportWidth: viewportWidth
+    };";
+    var result = (System.Collections.Generic.Dictionary<string, object>)js.ExecuteScript(script, element);
+
+    double top = Convert.ToDouble(result["top"]);
+    double bottom = Convert.ToDouble(result["bottom"]);
+    double left = Convert.ToDouble(result["left"]);
+    double right = Convert.ToDouble(result["right"]);
+    double viewportHeight = Convert.ToDouble(result["viewportHeight"]);
+    double viewportWidth = Convert.ToDouble(result["viewportWidth"]);
+
+    // Check if any part of the element is within the viewport
+    bool isPartiallyVisible = (top < viewportHeight && bottom > 0) && (left < viewportWidth && right > 0);
+
+    return isPartiallyVisible;
 }
