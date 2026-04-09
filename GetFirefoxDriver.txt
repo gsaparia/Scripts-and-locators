@@ -1,2 +1,157 @@
+# ==========================
+# Configurable target folder
+# ==========================
+$targetFolder   = "C:\Browser drivers"
+$geckoDriver    = Join-Path $targetFolder "geckodriver.exe"
+$tempZip        = Join-Path $env:TEMP "geckodriver.zip"
+$tempExtractDir = Join-Path $env:TEMP "geckodriver_extracted"
 
-  
+# ==========================
+# 1) Detect installed Firefox version
+#    Try default paths, then registry
+# ==========================
+$firefoxPaths = @(
+    "C:\Program Files\Mozilla Firefox\firefox.exe",
+    "C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
+)
+
+$firefoxExe = $firefoxPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $firefoxExe) {
+    try {
+        # Registry location for Firefox install info
+        $regPath = "HKLM:\SOFTWARE\Mozilla\Mozilla Firefox"
+        if (-not (Test-Path $regPath)) {
+            $regPath = "HKLM:\SOFTWARE\WOW6432Node\Mozilla\Mozilla Firefox"
+        }
+
+        $currentVersion = (Get-ItemProperty -Path $regPath -ErrorAction Stop)."CurrentVersion"
+        if (-not $currentVersion) { throw "No CurrentVersion value found." }
+
+        $installDirPath = Join-Path $regPath $currentVersion
+        $mainKey = Join-Path $installDirPath "Main"
+        $installDir = (Get-ItemProperty -Path $mainKey -ErrorAction Stop)."Install Directory"
+        $firefoxExe = Join-Path $installDir "firefox.exe"
+
+        if (-not (Test-Path $firefoxExe)) {
+            throw "Firefox not found at resolved install directory."
+        }
+    } catch {
+        Write-Host "❌ Mozilla Firefox not found via default paths or registry."
+        exit 1
+    }
+}
+
+$firefoxVersion = (Get-Item $firefoxExe).VersionInfo.ProductVersion
+Write-Host "Mozilla Firefox version detected: $firefoxVersion"
+
+# ==========================
+# 2) Determine target GeckoDriver version (latest)
+#    via GitHub API: https://api.github.com/repos/mozilla/geckodriver/releases/latest
+# ==========================
+
+# Architecture selection
+$arch = if ([Environment]::Is64BitOperatingSystem) { "win64" } else { "win32" }
+
+# Proxy (optional) - uncomment and adjust if needed
+# [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy("http://your.proxy:8080")
+# [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+
+# GitHub API call to get latest release metadata
+$latestReleaseApi = "https://api.github.com/repos/mozilla/geckodriver/releases/latest"
+Write-Host "Querying latest GeckoDriver release metadata..."
+
+try {
+    # GitHub API requires a user-agent
+    $headers = @{ "User-Agent" = "PowerShell-GeckoDriver-Updater" }
+    $releaseJson = Invoke-RestMethod -Uri $latestReleaseApi -Headers $headers -ErrorAction Stop
+
+    $tag = $releaseJson.tag_name  # e.g., "v0.34.0"
+    if (-not $tag) { throw "Failed to read tag_name from release JSON." }
+
+    $assetName = "geckodriver-$tag-$arch.zip"
+    $asset = $releaseJson.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+
+    if (-not $asset) {
+        throw "No asset named $assetName found in the latest release."
+    }
+
+    $downloadUrl = $asset.browser_download_url
+    Write-Host "Latest GeckoDriver tag: $tag"
+    Write-Host "Download asset: $assetName"
+} catch {
+    Write-Host "❌ Failed to get latest GeckoDriver release metadata from GitHub: $($_.Exception.Message)"
+    Write-Host "You can download manually: https://github.com/mozilla/geckodriver/releases"
+    exit 1
+}
+
+# ==========================
+# 3) Compare existing driver version and decide
+# ==========================
+$needsDownload = $true
+$targetGeckoVersion = $tag.TrimStart('v')  # normalize for comparison
+
+if (Test-Path $geckoDriver) {
+    $existingVersion = (Get-Item $geckoDriver).VersionInfo.ProductVersion
+    Write-Host "Existing GeckoDriver version detected: $existingVersion"
+
+    if ($existingVersion -eq $targetGeckoVersion) {
+        Write-Host "✅ GeckoDriver is already at latest version ($existingVersion). No download needed."
+        $needsDownload = $false
+    } else {
+        Write-Host "⚠️ GeckoDriver ($existingVersion) differs from latest ($targetGeckoVersion). Will update."
+    }
+} else {
+    Write-Host "ℹ️ GeckoDriver not found. Will download."
+}
+
+# ==========================
+# 4) Download & extract only if needed
+# ==========================
+if ($needsDownload) {
+
+    if (-not (Test-Path $targetFolder)) {
+        New-Item -ItemType Directory -Path $targetFolder | Out-Null
+    }
+
+    if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Force -Recurse -ErrorAction SilentlyContinue }
+
+    Write-Host "Downloading GeckoDriver from: $downloadUrl"
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing -ErrorAction Stop
+    } catch {
+        Write-Host "❌ Failed to download GeckoDriver asset: $($_.Exception.Message)"
+        Write-Host "Manual download: https://github.com/mozilla/geckodriver/releases/tag/$tag"
+        exit 1
+    }
+
+    try {
+        Write-Host "Download complete. Extracting..."
+        Expand-Archive -Path $tempZip -DestinationPath $tempExtractDir -Force
+
+        # Zip contains geckodriver.exe at the root
+        $extractedDriver = Get-ChildItem -Path $tempExtractDir -Recurse -Filter "geckodriver.exe" | Select-Object -First 1
+        if (-not $extractedDriver) {
+            throw "geckodriver.exe not found in the extracted archive."
+        }
+
+        # Stop running driver (best effort) before overwrite
+        Get-Process geckodriver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+        # Copy to target
+        Copy-Item -Path $extractedDriver.FullName -Destination $geckoDriver -Force
+
+        # Cleanup
+        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Confirm version
+        $newVersion = (Get-Item $geckoDriver).VersionInfo.ProductVersion
+        Write-Host "✅ GeckoDriver updated successfully to version $newVersion (Firefox detected: $firefoxVersion)"
+    } catch {
+        Write-Host "❌ Failed to extract or install GeckoDriver: $($_.Exception.Message)"
+        Write-Host "You can try manual download from: https://github.com/mozilla/geckodriver/releases/tag/$tag"
+        exit 1
+    }
+}
