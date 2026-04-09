@@ -1,1 +1,102 @@
-a
+//JS - NG + Multi Frame safe
+
+function flattenMultiFrameDOM(rootWindow = window) {
+    const cloneRoot = document.implementation.createHTMLDocument('Flattened Multi-Frame Copy');
+    const bodyClone = cloneRoot.body;
+
+    const elementMap = new Map();
+
+    function traverse(node, parentClone, cloneDoc) {
+        let clone;
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            clone = cloneDoc.createElement(node.tagName.toLowerCase());
+            for (let attr of node.attributes) {
+                clone.setAttribute(attr.name, attr.value);
+            }
+        } else if (node.nodeType === Node.TEXT_NODE) {
+            clone = cloneDoc.createTextNode(node.nodeValue);
+        } else {
+            return;
+        }
+
+        parentClone.appendChild(clone);
+        elementMap.set(clone, node);
+
+        if (node.shadowRoot) {
+            node.shadowRoot.childNodes.forEach(child => traverse(child, clone, cloneDoc));
+        }
+        node.childNodes.forEach(child => traverse(child, clone, cloneDoc));
+    }
+
+    function flattenDocument(doc, parentClone) {
+        const container = cloneRoot.createElement('div');
+        container.setAttribute('data-frame', doc.URL || 'main');
+        parentClone.appendChild(container);
+        traverse(doc.documentElement, container, cloneRoot);
+    }
+
+    function flattenFrames(win, parentClone) {
+        try {
+            flattenDocument(win.document, parentClone);
+            for (let i = 0; i < win.frames.length; i++) {
+                flattenFrames(win.frames[i], parentClone);
+            }
+        } catch (e) {
+            console.warn('Cannot access frame due to cross-origin restrictions:', e);
+        }
+    }
+
+    flattenFrames(rootWindow, bodyClone);
+
+    // ✅ Helpers
+    function findOriginalBySelector(selector) {
+        const clonedElement = cloneRoot.querySelector(selector);
+        return clonedElement ? elementMap.get(clonedElement) : null;
+    }
+
+    function findOriginalByXPath(xpath) {
+        const result = cloneRoot.evaluate(xpath, cloneRoot, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        return result.singleNodeValue ? elementMap.get(result.singleNodeValue) : null;
+    }
+
+    function findAllOriginalBySelector(selector) {
+        const clonedElements = cloneRoot.querySelectorAll(selector);
+        return Array.from(clonedElements).map(el => elementMap.get(el));
+    }
+
+    function findAllOriginalByXPath(xpath) {
+        const results = [];
+        const iterator = cloneRoot.evaluate(xpath, cloneRoot, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+        let node;
+        while ((node = iterator.iterateNext())) {
+            results.push(elementMap.get(node));
+        }
+        return results;
+    }
+
+    function findAllOriginal(selector) {
+        const isXPath = selector.startsWith("*//") || selector.startsWith("//") || selector.startsWith(".//")|| selector.trim().startsWith('(');
+        return isXPath ? findAllOriginalByXPath(selector) : findAllOriginalBySelector(selector);
+    }
+
+    return {
+        flattenedDoc: cloneRoot,
+        map: elementMap,
+        findOriginalBySelector,
+        findOriginalByXPath,
+        findAllOriginalBySelector,
+        findAllOriginalByXPath,
+        findAllOriginal
+    };
+}
+
+
+const {
+    flattenedDoc,
+    findOriginalBySelector,
+    findOriginalByXPath,
+    findAllOriginalBySelector,
+    findAllOriginalByXPath,
+    findAllOriginal
+} = flattenMultiFrameDOM();
+//findAllOriginal("<css or xpath>")
