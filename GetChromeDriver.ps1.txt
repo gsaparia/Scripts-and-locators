@@ -1,40 +1,64 @@
 # ==========================
 # Configurable target folder
 # ==========================
-$targetFolder = "C:\Browser drivers"
-$edgeDriverPath = Join-Path $targetFolder "msedgedriver.exe"
-$tempZip = "$env:TEMP\edgedriver.zip"
+$targetFolder   = "C:\Browser drivers"
+$chromeDriver   = Join-Path $targetFolder "chromedriver.exe"
+$tempZip        = Join-Path $env:TEMP "chromedriver.zip"
+$tempExtractDir = Join-Path $env:TEMP "chromedriver_extracted"
 
 # ==========================
-# 1) Get installed Edge version
+# 1) Get installed Chrome version
+#    (Path check first, then registry fallback)
 # ==========================
-$edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+$chromeExePaths = @(
+    "C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+)
 
-if (-not (Test-Path $edgePath)) {
-    Write-Host "❌ Microsoft Edge not found at default path."
-    exit
+$chromeExe = $chromeExePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $chromeExe) {
+    # Registry fallback (works on many enterprise images)
+    try {
+        $regPath = "HKLM:\SOFTWARE\Google\Chrome\BLBeacon"
+        $version = (Get-ItemProperty -Path $regPath -Name version -ErrorAction Stop).version
+        if (-not $version) { throw "No version in registry." }
+        $chromeVersion = $version
+        Write-Host "Google Chrome version detected from registry: $chromeVersion"
+    } catch {
+        try {
+            $regPathWow = "HKLM:\SOFTWARE\WOW6432Node\Google\Chrome\BLBeacon"
+            $version = (Get-ItemProperty -Path $regPathWow -Name version -ErrorAction Stop).version
+            if (-not $version) { throw "No version in registry (WOW6432Node)." }
+            $chromeVersion = $version
+            Write-Host "Google Chrome version detected from registry (WOW64): $chromeVersion"
+        } catch {
+            Write-Host "❌ Google Chrome not found via default paths or registry."
+            exit 1
+        }
+    }
+} else {
+    $chromeVersion = (Get-Item $chromeExe).VersionInfo.ProductVersion
+    Write-Host "Google Chrome version detected: $chromeVersion"
 }
 
-$edgeVersion = (Get-Item $edgePath).VersionInfo.ProductVersion
-Write-Host "Microsoft Edge version detected: $edgeVersion"
-
 # ==========================
-# 2) Check if EdgeDriver already exists and matches version
+# 2) Check if ChromeDriver already exists and matches version
 # ==========================
 $needsDownload = $true
 
-if (Test-Path $edgeDriverPath) {
-    $driverVersion = (Get-Item $edgeDriverPath).VersionInfo.ProductVersion
-    Write-Host "Existing EdgeDriver version detected: $driverVersion"
+if (Test-Path $chromeDriver) {
+    $driverVersion = (Get-Item $chromeDriver).VersionInfo.ProductVersion
+    Write-Host "Existing ChromeDriver version detected: $driverVersion"
 
-    if ($driverVersion -eq $edgeVersion) {
-        Write-Host "✅ EdgeDriver version matches Edge. No download needed."
+    if ($driverVersion -eq $chromeVersion) {
+        Write-Host "✅ ChromeDriver version matches Chrome. No download needed."
         $needsDownload = $false
     } else {
-        Write-Host "⚠️ Version mismatch. Will download correct EdgeDriver."
+        Write-Host "⚠️ Version mismatch. Will download correct ChromeDriver."
     }
 } else {
-    Write-Host "ℹ️ EdgeDriver not found. Will download."
+    Write-Host "ℹ️ ChromeDriver not found. Will download."
 }
 
 # ==========================
@@ -45,23 +69,58 @@ if ($needsDownload) {
     if (-not (Test-Path $targetFolder)) {
         New-Item -ItemType Directory -Path $targetFolder | Out-Null
     }
-	#Proxy 
-	#[System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy("http://proxy:8080")
-	#[System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
-    
-	#Url
-	$zipUrl = "https://msedgedriver.microsoft.com/$edgeVersion/edgedriver_win64.zip"
-    Write-Host "Downloading EdgeDriver from: $zipUrl"
+
+    if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $tempExtractDir) { Remove-Item $tempExtractDir -Force -Recurse -ErrorAction SilentlyContinue }
+
+    # Proxy (optional)
+    # [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy("http://your.proxy:8080")
+    # [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+
+    # --------------------------
+    # Chrome for Testing endpoint
+    # URL format:
+    #   https://storage.googleapis.com/chrome-for-testing-public/{VERSION}/win64/chromedriver-win64.zip
+    # --------------------------
+    $zipUrl = "https://storage.googleapis.com/chrome-for-testing-public/$chromeVersion/win64/chromedriver-win64.zip"
+    Write-Host "Downloading ChromeDriver from: $zipUrl"
 
     try {
         Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing -ErrorAction Stop
-        Write-Host "Download complete. Extracting..."
-        Expand-Archive -Path $tempZip -DestinationPath $targetFolder -Force
-        Remove-Item $tempZip -Force
-        Write-Host "✅ EdgeDriver updated successfully to version $edgeVersion"
+    } catch {
+        Write-Host "❌ Failed to download ChromeDriver for version: $chromeVersion"
+        Write-Host "If Chrome auto-updated recently, ensure the version exists on Chrome for Testing."
+        Write-Host "Manual downloads: https://googlechromelabs.github.io/chrome-for-testing/"
+        exit 1
     }
-    catch {
-        Write-Host "❌ Failed to download EdgeDriver from: $zipUrl"
-        Write-Host "Visit https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/ to download manually."
+
+    try {
+        Write-Host "Download complete. Extracting..."
+        Expand-Archive -Path $tempZip -DestinationPath $tempExtractDir -Force
+
+        # The archive structure is typically:
+        # chromedriver-win64/chromedriver.exe
+        $extractedDriver = Get-ChildItem -Path $tempExtractDir -Recurse -Filter "chromedriver.exe" | Select-Object -First 1
+        if (-not $extractedDriver) {
+            throw "chromedriver.exe not found in the extracted archive."
+        }
+
+        # Stop any running chromedriver to allow overwrite (best-effort)
+        Get-Process chromedriver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+        # Copy to target (overwrite)
+        Copy-Item -Path $extractedDriver.FullName -Destination $chromeDriver -Force
+
+        # Cleanup
+        Remove-Item $tempZip -Force -ErrorAction SilentlyContinue
+        Remove-Item $tempExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Confirm version
+        $newVersion = (Get-Item $chromeDriver).VersionInfo.ProductVersion
+        Write-Host "✅ ChromeDriver updated successfully to version $newVersion"
+    } catch {
+        Write-Host "❌ Failed to extract or install ChromeDriver: $($_.Exception.Message)"
+        Write-Host "You can try manual download from: https://googlechromelabs.github.io/chrome-for-testing/"
+        exit 1
     }
 }
